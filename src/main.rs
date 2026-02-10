@@ -1,8 +1,8 @@
-use macroquad::prelude::*;
 use ::rand;
-use std::time::Instant;
-
+use macroquad::prelude::*;
 use rand::RngExt;
+use std::time::Instant;
+use rand::seq::SliceRandom;
 
 const SIZE: f32 = 20.0;
 const CAPTION_HEIGHT: f32 = 30.0;
@@ -39,21 +39,17 @@ fn gen_map(rows: u8, cols: u8, mut mines_count: u8) -> Vec<Vec<Cell>> {
     ];
 
     // Place mines.
-    // TODO: use better way without probing.
     let mut rng = rand::rng();
-    while mines_count > 0 {
-        let row = rng.random_range(0..rows) as usize;
-        let col = rng.random_range(0..cols) as usize;
-        match map.get(row).unwrap().get(col).unwrap() {
-            Cell {
-                cell: CellType::Mine,
-                ..
-            } => (),
-            _ => {
-                map[row][col].cell = CellType::Mine;
-                mines_count = mines_count.saturating_sub(1);
-            }
-        }
+
+    let mut coordinates_map = map
+        .iter()
+        .enumerate()
+        .flat_map(|(x, row)| row.iter().enumerate().map(move |(y, _)| (x, y)))
+        .collect::<Vec<(usize, usize)>>();
+    // wow, "use" is not only for import (or reuse), but can completely change the code behaviour
+    coordinates_map.shuffle(&mut rng);
+    for coordinate in coordinates_map.iter().take(mines_count as usize) {
+        map[coordinate.0][coordinate.1].cell = CellType::Mine;
     }
 
     // Calculate numbers around mines.
@@ -176,7 +172,7 @@ async fn main() {
     //print_map(map.as_slice());
 
     let mine_center = measure_text("X", None, 25, 1.0);
-    let dot_center = measure_text(".", None, 25, 1.0);
+    let dot_center = measure_text(" ", None, 25, 1.0);
     let q_center = measure_text("!", None, 25, 1.0);
 
     request_new_screen_size(WIDTH as f32 * SIZE, (HEIGHT as f32) * SIZE + CAPTION_HEIGHT);
@@ -219,7 +215,7 @@ async fn main() {
                         ..
                     } => {
                         draw_text(
-                            ".",
+                            " ",
                             x + (SIZE - dot_center.width) / 2.0,
                             y - 5.0,
                             25.0,
