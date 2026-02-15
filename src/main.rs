@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use ::rand;
 use macroquad::prelude::*;
 use std::time::Instant;
@@ -30,6 +31,38 @@ struct Game {
     mines_found: u8,
     to_open_count: u16,
     time: usize,
+    status: String,
+}
+
+impl Game {
+    fn fail(&mut self) {
+        for row in self.map.iter_mut().flat_map(|row| row.iter_mut()) {
+            row.is_opened = true;
+        };
+        self.status = "Fail((".to_string();
+
+    }
+}
+
+
+impl Display for Game {
+
+    /// Provides map and some data.
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(format!("Found: {}, to open: {}\n", self.mines_found, self.to_open_count).as_str())?;
+        for row in &self.map {
+            for cell in row {
+                match cell.cell {
+                    CellType::Mine => f.write_str("*")?,
+                    CellType::Empty => f.write_str(".")?,
+                    CellType::Number(n) => f.write_str(n.to_string().as_str())?,
+                }
+            };
+            f.write_str("\n")?;
+        };
+        f.write_str("-----------\n")?;
+        Ok(())
+    }
 }
 
 /// Generates the map.
@@ -199,7 +232,7 @@ fn open_around(game: &mut Game, coordinates: (usize, usize), number: u8) {
             match game.map[row_number][col_number] {
                 Cell { is_opened: true, .. } | Cell { is_labeled: true, .. } => {},
                 Cell { cell: CellType::Mine, .. } => {
-                    fail(&mut game.map)
+                    game.fail()
                 },
                 Cell { cell: CellType::Empty, .. } => {
                     open_empties(game, (row_number, col_number))
@@ -217,20 +250,21 @@ fn open_around(game: &mut Game, coordinates: (usize, usize), number: u8) {
 fn new_game() -> Game {
 
     Game {
-        map: gen_map(WIDTH, HEIGHT),
+        map: gen_map(HEIGHT, WIDTH),
         started_at: Instant::now(),
         is_time_blocked: false,
         mines_found: 0,
         to_open_count: u16::from(WIDTH) * u16::from(HEIGHT) - u16::from(MINES_COUNT),
         time: 0,
+        status: String::new(),
     }
 }
 
 
 fn handle_input(game: &mut Game) {
     let mouse_position = mouse_position();
-    let row = (mouse_position.0 / SIZE) as usize;
-    let col = ((mouse_position.1 - CAPTION_HEIGHT) / SIZE) as usize;
+    let col = (mouse_position.0 / SIZE) as usize;
+    let row = ((mouse_position.1 - CAPTION_HEIGHT) / SIZE) as usize;
 
     // ======= Mouse clicks handlers =======
     if is_mouse_button_pressed(MouseButton::Left) {
@@ -240,7 +274,7 @@ fn handle_input(game: &mut Game) {
                 ..
             } => {
                 // game failed
-                fail(&mut game.map);
+                game.fail();
                 //status_text.push_str("Fail(");
                 game.is_time_blocked = true;
             }
@@ -263,7 +297,7 @@ fn handle_input(game: &mut Game) {
                 game.to_open_count -= 1;
             }
             _ => (),
-        }
+        };
     } else if is_mouse_button_pressed(MouseButton::Right) {
         game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
         if game.map[row][col].is_labeled {
@@ -282,12 +316,12 @@ fn draw(game: &Game) {
 
     for (row_index, row) in game.map.iter().enumerate() {
         for (col_index, _) in row.iter().enumerate() {
-            let x = 0.0 + (row_index as f32) * SIZE;
-            let mut y = CAPTION_HEIGHT + (col_index as f32) * SIZE;
+            let x = 0.0 + (col_index as f32) * SIZE;
+            let mut y = CAPTION_HEIGHT + (row_index as f32) * SIZE;
 
             let bg_color = match game.map[row_index][col_index] {
-                Cell {cell: CellType::Empty | CellType::Number(_), is_opened: true, ..} => GRAY,
-                _ => DARKGRAY,
+                Cell {cell: CellType::Empty | CellType::Number(_), is_opened: true, ..} => WHITE,
+                _ => GRAY,
             };
             draw_rectangle(x, y, SIZE, SIZE, bg_color);
             draw_rectangle_lines(x, y, SIZE, SIZE, 1.0, DARKGREEN);
@@ -350,7 +384,7 @@ fn draw(game: &Game) {
     draw_text(
         format!(
             "{}/{} {:3} {}",
-            game.mines_found, MINES_COUNT, game.time, ""
+            game.mines_found, MINES_COUNT, game.time, game.status,
         ).as_str(),
         20.0,
         20.0,
@@ -366,27 +400,6 @@ fn draw(game: &Game) {
         BEIGE,
     );
 
-}
-
-fn fail(map: &mut Vec<Vec<Cell>>) {
-    for row in map.iter_mut().flat_map(|row| row.iter_mut()) {
-        row.is_opened = true;
-    }
-}
-
-#[warn(dead_code)]
-/// For map debugging.
-fn print_map(map: &[Vec<Cell>]) {
-    for row in map {
-        for cell in row {
-            match cell.cell {
-                CellType::Mine => print!("*"),
-                CellType::Empty => print!("."),
-                CellType::Number(n) => print!("{}", n),
-            }
-        }
-        println!();
-    }
 }
 
 #[macroquad::main("Miner")]
