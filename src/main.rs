@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::io::{stdout, Write};
 use ::rand;
 use macroquad::prelude::*;
 use std::time::Instant;
@@ -40,7 +41,15 @@ impl Game {
             row.is_opened = true;
         };
         self.status = "Fail((".to_string();
+        self.is_time_blocked = true;
+    }
 
+    fn win(&mut self) {
+        for row in self.map.iter_mut().flat_map(|row| row.iter_mut()) {
+            row.is_opened = true;
+        };
+        self.status = "Win!".to_string();
+        self.is_time_blocked = true;
     }
 }
 
@@ -52,10 +61,11 @@ impl Display for Game {
         f.write_str(format!("Found: {}, to open: {}\n", self.mines_found, self.to_open_count).as_str())?;
         for row in &self.map {
             for cell in row {
-                match cell.cell {
-                    CellType::Mine => f.write_str("*")?,
-                    CellType::Empty => f.write_str(".")?,
-                    CellType::Number(n) => f.write_str(n.to_string().as_str())?,
+                match cell {
+                    Cell {cell: CellType::Mine, is_labeled: true, ..} => f.write_str("*")?,
+                    Cell {cell: CellType::Mine, is_labeled: false, ..} => f.write_str("?")?,
+                    Cell {cell: CellType::Empty, ..} => f.write_str(".")?,
+                    Cell {cell: CellType::Number(n), ..} => f.write_str(n.to_string().as_str())?,
                 }
             };
             f.write_str("\n")?;
@@ -145,14 +155,18 @@ fn gen_map(rows: u8, cols: u8) -> Vec<Vec<Cell>> {
 ///
 /// This includes opening recursively more than one cell.
 fn open_empties(game: &mut Game, start_point: (usize, usize)) {
-    let mut to_process: Vec<(usize, usize)> = vec![start_point];
 
     let max_rows = game.map.len();
     let max_cols = game.map[0].len();
+    let mut to_process: Vec<(usize, usize)> = vec![start_point];
+
+    // game.map[start_point.0][start_point.1].is_opened = true;
+    // game.to_open_count -= 1;
 
     while let Some(point) = to_process.pop() {
         for dx in -1..=1 {
             for dy in -1..=1 {
+
                 let row_number: isize = point.0 as isize + dx;
                 let col_number: isize = point.1 as isize + dy;
 
@@ -164,18 +178,20 @@ fn open_empties(game: &mut Game, start_point: (usize, usize)) {
                     continue;
                 }
 
-                if game.map[row_number as usize][col_number as usize].is_opened {
+                let row_number = row_number as usize;
+                let col_number = col_number as usize;
+                if game.map[row_number][col_number].is_opened {
                     continue;
                 }
 
-                game.map[row_number as usize][col_number as usize].is_opened = true;
+                game.map[row_number][col_number].is_opened = true;
                 game.to_open_count -= 1;
 
                 if matches!(
-                    game.map[row_number as usize][col_number as usize].cell,
+                    game.map[row_number][col_number].cell,
                     CellType::Empty
-                ) {
-                    to_process.push((row_number as usize, col_number as usize));
+                ) && !(dx == 0 && dy == 0) {
+                    to_process.push((row_number, col_number));
                 }
             }
         }
@@ -262,6 +278,11 @@ fn new_game() -> Game {
 
 
 fn handle_input(game: &mut Game) {
+
+    if game.is_time_blocked {
+        return;
+    }
+
     let mouse_position = mouse_position();
     let col = (mouse_position.0 / SIZE) as usize;
     let row = ((mouse_position.1 - CAPTION_HEIGHT) / SIZE) as usize;
@@ -269,15 +290,18 @@ fn handle_input(game: &mut Game) {
     // ======= Mouse clicks handlers =======
     if is_mouse_button_pressed(MouseButton::Left) {
         match game.map[row][col] {
+            // Ignore click on labeled cell.
+            Cell {
+                    is_labeled: true, ..
+            } => (),
+            // Click on mine - game failed.
             Cell {
                 cell: CellType::Mine,
                 ..
             } => {
-                // game failed
                 game.fail();
-                //status_text.push_str("Fail(");
-                game.is_time_blocked = true;
             }
+            // Empty cell
             Cell {
                 cell: CellType::Empty,
                 is_opened: false,
@@ -290,20 +314,27 @@ fn handle_input(game: &mut Game) {
             } => {
                 open_around(game, (row, col), n);
             }
-            Cell {
-                is_labeled: false, ..
-            } => {
+            _ => {
                 game.map[row][col].is_opened = true;
                 game.to_open_count -= 1;
             }
-            _ => (),
         };
+        if game.to_open_count == 0 {
+            game.win()
+        };
+        println!("{game}");
+        stdout().flush().unwrap();
     } else if is_mouse_button_pressed(MouseButton::Right) {
-        game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
-        if game.map[row][col].is_labeled {
-            game.mines_found = game.mines_found.saturating_add(1);
-        } else {
-            game.mines_found = game.mines_found.saturating_sub(1);
+        match game.map[row][col] {
+            Cell {is_opened: false, ..} => {
+                game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
+                if game.map[row][col].is_labeled {
+                    game.mines_found = game.mines_found.saturating_add(1);
+                } else {
+                    game.mines_found = game.mines_found.saturating_sub(1);
+                }
+            },
+            _ => (),
         }
     }
 }
@@ -380,6 +411,13 @@ fn draw(game: &Game) {
             }
         }
     }
+}
+
+fn draw_status(game: &mut Game) {
+
+    if !game.is_time_blocked {
+        game.time = game.started_at.elapsed().as_secs() as usize;
+    }
 
     draw_text(
         format!(
@@ -399,17 +437,10 @@ fn draw(game: &Game) {
         20.0,
         BEIGE,
     );
-
 }
 
 #[macroquad::main("Miner")]
 async fn main() {
-    //let mut to_open_count = u16::from(WIDTH) * u16::from(HEIGHT) - u16::from(MINES_COUNT);
-    //let mut status_text = String::new();
-
-
-    //print_map(map.as_slice());
-
 
     request_new_screen_size(WIDTH as f32 * SIZE, (HEIGHT as f32) * SIZE + CAPTION_HEIGHT);
     // from the docs: @"the size in macroquad won’t be updated until the next next_frame().await."
@@ -424,12 +455,9 @@ async fn main() {
             game = new_game();
         }
 
-        draw(&game);
         handle_input(&mut game);
-
-        if !game.is_time_blocked {
-            game.time = game.started_at.elapsed().as_secs() as usize;
-        }
+        draw(&game);
+        draw_status(&mut game);
 
         next_frame().await
     }
