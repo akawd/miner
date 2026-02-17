@@ -1,9 +1,9 @@
-use std::fmt::{Display, Formatter};
-use std::io::{stdout, Write};
 use ::rand;
 use macroquad::prelude::*;
-use std::time::Instant;
 use rand::seq::SliceRandom;
+use std::fmt::{Display, Formatter};
+use std::io::{Write, stdout};
+use std::time::Instant;
 
 const SIZE: f32 = 20.0;
 const CAPTION_HEIGHT: f32 = 30.0;
@@ -26,20 +26,32 @@ pub struct Cell {
 }
 
 struct Game {
-    map: Vec<Vec<Cell>>,
-    started_at: Instant,
-    is_time_blocked: bool,
-    mines_found: u8,
-    to_open_count: u16,
-    time: usize,
-    status: String,
+    map: Vec<Vec<Cell>>,   // game map - 2d vec with cells
+    started_at: Instant,   // for timer in UI
+    is_time_blocked: bool, // true when game failed or win
+    mines_found: u8,       // how may cells are labeled as mines
+    to_open_count: u16,    // how many cells must be opened to win the game (mines not included)
+    time: usize,           // game time in seconds
+    status: String,        // some text status
 }
 
 impl Game {
+    fn new_game() -> Self {
+        Game {
+            map: gen_map(HEIGHT, WIDTH),
+            started_at: Instant::now(),
+            is_time_blocked: false,
+            mines_found: 0,
+            to_open_count: u16::from(WIDTH) * u16::from(HEIGHT) - u16::from(MINES_COUNT),
+            time: 0,
+            status: String::new(),
+        }
+    }
+
     fn fail(&mut self) {
         for row in self.map.iter_mut().flat_map(|row| row.iter_mut()) {
             row.is_opened = true;
-        };
+        }
         self.status = "Fail((".to_string();
         self.is_time_blocked = true;
     }
@@ -47,29 +59,47 @@ impl Game {
     fn win(&mut self) {
         for row in self.map.iter_mut().flat_map(|row| row.iter_mut()) {
             row.is_opened = true;
-        };
+        }
         self.status = "Win!".to_string();
         self.is_time_blocked = true;
     }
 }
 
-
 impl Display for Game {
-
     /// Provides map and some data.
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(format!("Found: {}, to open: {}\n", self.mines_found, self.to_open_count).as_str())?;
+        f.write_str(
+            format!(
+                "Found: {}, to open: {}\n",
+                self.mines_found, self.to_open_count
+            )
+            .as_str(),
+        )?;
         for row in &self.map {
             for cell in row {
                 match cell {
-                    Cell {cell: CellType::Mine, is_labeled: true, ..} => f.write_str("*")?,
-                    Cell {cell: CellType::Mine, is_labeled: false, ..} => f.write_str("?")?,
-                    Cell {cell: CellType::Empty, ..} => f.write_str(".")?,
-                    Cell {cell: CellType::Number(n), ..} => f.write_str(n.to_string().as_str())?,
+                    Cell {
+                        cell: CellType::Mine,
+                        is_labeled: true,
+                        ..
+                    } => f.write_str("*")?,
+                    Cell {
+                        cell: CellType::Mine,
+                        is_labeled: false,
+                        ..
+                    } => f.write_str("?")?,
+                    Cell {
+                        cell: CellType::Empty,
+                        ..
+                    } => f.write_str(".")?,
+                    Cell {
+                        cell: CellType::Number(n),
+                        ..
+                    } => f.write_str(n.to_string().as_str())?,
                 }
-            };
+            }
             f.write_str("\n")?;
-        };
+        }
         f.write_str("-----------\n")?;
         Ok(())
     }
@@ -106,13 +136,7 @@ fn gen_map(rows: u8, cols: u8) -> Vec<Vec<Cell>> {
     // Calculate numbers around mines.
     for row_number in 0..map.len() {
         for col_number in 0..map[row_number].len() {
-            if matches!(
-                map[row_number][col_number],
-                Cell {
-                    cell: CellType::Mine,
-                    ..
-                }
-            ) {
+            if matches!(map[row_number][col_number].cell, CellType::Mine) {
                 continue;
             }
 
@@ -155,18 +179,13 @@ fn gen_map(rows: u8, cols: u8) -> Vec<Vec<Cell>> {
 ///
 /// This includes opening recursively more than one cell.
 fn open_empties(game: &mut Game, start_point: (usize, usize)) {
-
     let max_rows = game.map.len();
     let max_cols = game.map[0].len();
     let mut to_process: Vec<(usize, usize)> = vec![start_point];
 
-    // game.map[start_point.0][start_point.1].is_opened = true;
-    // game.to_open_count -= 1;
-
     while let Some(point) = to_process.pop() {
         for dx in -1..=1 {
             for dy in -1..=1 {
-
                 let row_number: isize = point.0 as isize + dx;
                 let col_number: isize = point.1 as isize + dy;
 
@@ -185,19 +204,18 @@ fn open_empties(game: &mut Game, start_point: (usize, usize)) {
                 }
 
                 game.map[row_number][col_number].is_opened = true;
+                // made so intentionally, "panic" here means some error in logic
                 game.to_open_count -= 1;
 
-                if matches!(
-                    game.map[row_number][col_number].cell,
-                    CellType::Empty
-                ) && !(dx == 0 && dy == 0) {
+                if matches!(game.map[row_number][col_number].cell, CellType::Empty)
+                    && !(dx == 0 && dy == 0)
+                {
                     to_process.push((row_number, col_number));
                 }
             }
         }
     }
 }
-
 
 fn open_around(game: &mut Game, coordinates: (usize, usize), number: u8) {
     let max_rows = game.map.len();
@@ -208,24 +226,30 @@ fn open_around(game: &mut Game, coordinates: (usize, usize), number: u8) {
     for dx in -1..=1 {
         for dy in -1..=1 {
             if dx == 0 && dy == 0 {
-                continue
+                continue;
             };
 
             let row_number: isize = coordinates.0 as isize + dx;
             let col_number: isize = coordinates.1 as isize + dy;
 
-            if row_number < 0 || row_number == max_rows as isize || col_number < 0 || col_number == max_cols as isize {
-                continue
+            if row_number < 0
+                || row_number == max_rows as isize
+                || col_number < 0
+                || col_number == max_cols as isize
+            {
+                continue;
             }
 
             let row_number = row_number as usize;
             let col_number = col_number as usize;
 
             match game.map[row_number][col_number] {
-                Cell { is_labeled: true, .. } => {
+                Cell {
+                    is_labeled: true, ..
+                } => {
                     labeled_count += 1;
-                },
-                _ => ()
+                }
+                _ => (),
             }
         }
     }
@@ -239,46 +263,42 @@ fn open_around(game: &mut Game, coordinates: (usize, usize), number: u8) {
             let row_number: isize = coordinates.0 as isize + dx;
             let col_number: isize = coordinates.1 as isize + dy;
 
-            if row_number < 0 || row_number == max_rows as isize || col_number < 0 || col_number == max_cols as isize {
-                continue
+            if row_number < 0
+                || row_number == max_rows as isize
+                || col_number < 0
+                || col_number == max_cols as isize
+            {
+                continue;
             }
 
             let row_number = row_number as usize;
             let col_number = col_number as usize;
             match game.map[row_number][col_number] {
-                Cell { is_opened: true, .. } | Cell { is_labeled: true, .. } => {},
-                Cell { cell: CellType::Mine, .. } => {
-                    game.fail()
-                },
-                Cell { cell: CellType::Empty, .. } => {
-                    open_empties(game, (row_number, col_number))
-                },
+                Cell {
+                    is_opened: true, ..
+                }
+                | Cell {
+                    is_labeled: true, ..
+                } => (),
+                Cell {
+                    cell: CellType::Mine,
+                    ..
+                } => game.fail(),
+                Cell {
+                    cell: CellType::Empty,
+                    ..
+                } => open_empties(game, (row_number, col_number)),
                 _ => {
                     game.map[row_number][col_number].is_opened = true;
-                    game.to_open_count -= 1;
+                    // TODO: some logic error here, panics when "game.to_open_count -= 1"
+                    game.to_open_count = game.to_open_count.saturating_sub(1);
                 }
             }
-
         }
     }
 }
 
-fn new_game() -> Game {
-
-    Game {
-        map: gen_map(HEIGHT, WIDTH),
-        started_at: Instant::now(),
-        is_time_blocked: false,
-        mines_found: 0,
-        to_open_count: u16::from(WIDTH) * u16::from(HEIGHT) - u16::from(MINES_COUNT),
-        time: 0,
-        status: String::new(),
-    }
-}
-
-
 fn handle_input(game: &mut Game) {
-
     if game.is_time_blocked {
         return;
     }
@@ -292,7 +312,7 @@ fn handle_input(game: &mut Game) {
         match game.map[row][col] {
             // Ignore click on labeled cell.
             Cell {
-                    is_labeled: true, ..
+                is_labeled: true, ..
             } => (),
             // Click on mine - game failed.
             Cell {
@@ -300,7 +320,7 @@ fn handle_input(game: &mut Game) {
                 ..
             } => {
                 game.fail();
-            }
+            },
             // Empty cell
             Cell {
                 cell: CellType::Empty,
@@ -308,12 +328,14 @@ fn handle_input(game: &mut Game) {
                 ..
             } => {
                 open_empties(game, (row, col));
-            }
+            },
             Cell {
-                cell: CellType::Number(n) , is_opened: true, ..
+                cell: CellType::Number(n),
+                is_opened: true,
+                ..
             } => {
                 open_around(game, (row, col), n);
-            }
+            },
             _ => {
                 game.map[row][col].is_opened = true;
                 game.to_open_count -= 1;
@@ -324,23 +346,20 @@ fn handle_input(game: &mut Game) {
         };
         println!("{game}");
         stdout().flush().unwrap();
-    } else if is_mouse_button_pressed(MouseButton::Right) {
-        match game.map[row][col] {
-            Cell {is_opened: false, ..} => {
-                game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
-                if game.map[row][col].is_labeled {
-                    game.mines_found = game.mines_found.saturating_add(1);
-                } else {
-                    game.mines_found = game.mines_found.saturating_sub(1);
-                }
-            },
-            _ => (),
+    } else if is_mouse_button_pressed(MouseButton::Right)
+        && !game.map[row][col].is_opened {
+
+        game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
+        if game.map[row][col].is_labeled {
+            game.mines_found = game.mines_found.saturating_add(1);
+        } else {
+            game.mines_found = game.mines_found.saturating_sub(1);
         }
+
     }
 }
 
 fn draw(game: &Game) {
-
     let mine_center = measure_text("X", None, 25, 1.0);
     let dot_center = measure_text(" ", None, 25, 1.0);
     let q_center = measure_text("!", None, 25, 1.0);
@@ -351,12 +370,15 @@ fn draw(game: &Game) {
             let mut y = CAPTION_HEIGHT + (row_index as f32) * SIZE;
 
             let bg_color = match game.map[row_index][col_index] {
-                Cell {cell: CellType::Empty | CellType::Number(_), is_opened: true, ..} => WHITE,
+                Cell {
+                    cell: CellType::Empty | CellType::Number(_),
+                    is_opened: true,
+                    ..
+                } => WHITE,
                 _ => GRAY,
             };
             draw_rectangle(x, y, SIZE, SIZE, bg_color);
             draw_rectangle_lines(x, y, SIZE, SIZE, 1.0, DARKGREEN);
-
 
             y += SIZE - 3.0;
 
@@ -367,14 +389,14 @@ fn draw(game: &Game) {
                     ..
                 } => {
                     draw_text("!", x + (SIZE - q_center.width) / 2.0, y, 25.0, RED);
-                }
+                },
                 Cell {
                     cell: CellType::Mine,
                     is_opened: true,
                     ..
                 } => {
                     draw_text("X", x + (SIZE - mine_center.width) / 2.0, y, 25.0, RED);
-                }
+                },
                 Cell {
                     cell: CellType::Empty,
                     is_opened: true,
@@ -387,7 +409,7 @@ fn draw(game: &Game) {
                         25.0,
                         BLACK,
                     );
-                }
+                },
                 Cell {
                     cell: CellType::Number(n),
                     is_opened: true,
@@ -405,7 +427,7 @@ fn draw(game: &Game) {
                     let text = n_as_str.as_str();
                     let digit_center = measure_text(text, None, 25, 1.0);
                     draw_text(text, x + (SIZE - digit_center.width) / 2.0, y, 25.0, color);
-                }
+                },
                 // Miss anything?
                 _ => (),
             }
@@ -414,7 +436,6 @@ fn draw(game: &Game) {
 }
 
 fn draw_status(game: &mut Game) {
-
     if !game.is_time_blocked {
         game.time = game.started_at.elapsed().as_secs() as usize;
     }
@@ -423,36 +444,30 @@ fn draw_status(game: &mut Game) {
         format!(
             "{}/{} {:3} {}",
             game.mines_found, MINES_COUNT, game.time, game.status,
-        ).as_str(),
+        )
+        .as_str(),
         20.0,
         20.0,
         20.0,
         RED,
     );
 
-    draw_text(
-        "N for new game.",
-        450.0,
-        20.0,
-        20.0,
-        BEIGE,
-    );
+    draw_text("N for new game.", 450.0, 20.0, 20.0, BEIGE);
 }
 
 #[macroquad::main("Miner")]
 async fn main() {
-
     request_new_screen_size(WIDTH as f32 * SIZE, (HEIGHT as f32) * SIZE + CAPTION_HEIGHT);
     // from the docs: @"the size in macroquad won’t be updated until the next next_frame().await."
     next_frame().await;
 
-    let mut game = new_game();
+    let mut game = Game::new_game();
 
     loop {
         clear_background(GRAY);
 
         if is_key_pressed(KeyCode::N) {
-            game = new_game();
+            game = Game::new_game();
         }
 
         handle_input(&mut game);
