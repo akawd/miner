@@ -550,8 +550,8 @@ fn draw_status(game: &mut Game) {
 
 fn start_http_server() {
     std::thread::spawn(move || {
-        let server = Server::http("127.0.0.1:8080").unwrap();
-        println!("HTTP server started at http://127.0.0.1:8080");
+        let server = Server::http("0.0.0.0:8080").unwrap();
+        println!("HTTP server started at http://0.0.0.0:8080");
         
         for request in server.incoming_requests() {
             let url = request.url();
