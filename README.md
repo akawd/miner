@@ -45,9 +45,9 @@ curl -X POST http://127.0.0.1:8080/restart
   "height": 16,
   "cells": [
     [
-      {"row": 0, "col": 0, "cell": "empty", "is_opened": true, "is_labeled": false},
-      {"row": 0, "col": 1, "cell": "unknown", "is_opened": false, "is_labeled": false},
-      {"row": 0, "col": 2, "cell": "1", "is_opened": true, "is_labeled": false}
+      {"row": 0, "col": 0, "cell": "empty", "is_opened": true, "is_labeled": false, "unknown_around": 0},
+      {"row": 0, "col": 1, "cell": "unknown", "is_opened": false, "is_labeled": false, "unknown_around": 3},
+      {"row": 0, "col": 2, "cell": "1", "is_opened": true, "is_labeled": false, "unknown_around": 0}
     }
   ],
   "time": 42,
@@ -61,10 +61,11 @@ curl -X POST http://127.0.0.1:8080/restart
 - `cell`: `"unknown"` (неоткрыта), `"mine"`, `"empty"`, или цифра (1-8)
 - `is_opened`: открыта ли клетка
 - `is_labeled`: установлен ли флаг
+- `unknown_around`: количество неоткрытых клеток вокруг (0-8)
 
 ## Рекомендации для игрока
 
-Всегда используй флаги для клеток, которые считаешь минами:
+Всегда помечай клетки, которые считаешь минами:
 ```bash
 curl -X POST "http://127.0.0.1:8080/flag?x=5&y=3"
 ```
@@ -72,4 +73,8 @@ curl -X POST "http://127.0.0.1:8080/flag?x=5&y=3"
 **Важно**: 
 - После каждого `/click`, `/flag` или `/restart` запроса сервер возвращает новое состояние игры в JSON. Используй его для планирования следующего хода.
 - Нумерация строк и колонок начинается с **0**. x = колонка, y = строка.
-- Каждая клетка в ответе содержит `row` и `col` для удобства.
+- Каждая клетка в ответе содержит `row` и `col`.
+
+
+## Как искать мины:
+- если ячейка открыта, это цифра, и кол-во неоткрытых клеток вокруг равно цифре, значит это мина.    

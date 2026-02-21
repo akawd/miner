@@ -61,6 +61,7 @@ struct CellState {
     cell: String,
     is_opened: bool,
     is_labeled: bool,
+    unknown_around: u8,
 }
 
 impl Game {
@@ -77,6 +78,9 @@ impl Game {
     }
 
     fn to_state(&self) -> GameState {
+        let max_rows = self.map.len();
+        let max_cols = self.map[0].len();
+        
         let cells: Vec<Vec<CellState>> = self.map
             .iter()
             .enumerate()
@@ -93,12 +97,28 @@ impl Game {
                         } else {
                             "unknown".to_string()
                         };
+                        
+                        let mut unknown_around: u8 = 0;
+                        for dx in -1isize..=1 {
+                            for dy in -1isize..=1 {
+                                if dx == 0 && dy == 0 { continue; }
+                                let r = row_idx as isize + dx;
+                                let c = col_idx as isize + dy;
+                                if r >= 0 && r < max_rows as isize && c >= 0 && c < max_cols as isize {
+                                    if !self.map[r as usize][c as usize].is_opened {
+                                        unknown_around += 1;
+                                    }
+                                }
+                            }
+                        }
+                        
                         CellState {
                             row: row_idx,
                             col: col_idx,
                             cell: cell_str,
                             is_opened: cell.is_opened,
                             is_labeled: cell.is_labeled,
+                            unknown_around,
                         }
                     })
                     .collect()
