@@ -9,9 +9,9 @@ use tiny_http::{Response, Server};
 
 const SIZE: f32 = 20.0;
 const CAPTION_HEIGHT: f32 = 30.0;
-const WIDTH: u8 = 9;
-const HEIGHT: u8 = 9;
-const MINES_COUNT: u8 = 10;
+const WIDTH: u8 = 30;
+const HEIGHT: u8 = 16;
+const MINES_COUNT: u8 = 99;
 
 #[derive(Clone)]
 pub enum CellType {
