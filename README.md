@@ -45,9 +45,9 @@ curl -X POST http://127.0.0.1:8080/restart
   "height": 16,
   "cells": [
     [
-      {"row": 0, "col": 0, "cell": "empty", "is_opened": true, "is_labeled": false, "unknown_around": 0},
-      {"row": 0, "col": 1, "cell": "unknown", "is_opened": false, "is_labeled": false, "unknown_around": 3},
-      {"row": 0, "col": 2, "cell": "1", "is_opened": true, "is_labeled": false, "unknown_around": 0}
+      {"row": 0, "col": 0, "cell": "empty", "is_opened": true, "is_labeled": false, "unknown_around": 0, "labeled_around": 0},
+      {"row": 0, "col": 1, "cell": "unknown", "is_opened": false, "is_labeled": false, "unknown_around": 3, "labeled_around": 1},
+      {"row": 0, "col": 2, "cell": "1", "is_opened": true, "is_labeled": false, "unknown_around": 0, "labeled_around": 0}
     }
   ],
   "time": 42,
@@ -62,10 +62,11 @@ curl -X POST http://127.0.0.1:8080/restart
 - `is_opened`: открыта ли клетка
 - `is_labeled`: установлен ли флаг
 - `unknown_around`: количество неоткрытых клеток вокруг (0-8)
+- `labeled_around`: количество клеток вокруг, помеченных флагами (0-8)
 
 ## Рекомендации для игрока
 
-Всегда помечай клетки, которые считаешь минами:
+Всегда помечай клетки, которые считаешь минами, флагом:
 ```bash
 curl -X POST "http://127.0.0.1:8080/flag?x=5&y=3"
 ```
@@ -76,5 +77,10 @@ curl -X POST "http://127.0.0.1:8080/flag?x=5&y=3"
 - Каждая клетка в ответе содержит `row` и `col`.
 
 
-## Как искать мины:
-- если ячейка открыта, это цифра, и кол-во неоткрытых клеток вокруг равно цифре, значит это мина.    
+## Правила как искать мины:
+- не пытайся угадать, всегда сначала пробуй искать используя правила;
+- начинай с поиска ячеек с цифрой где кол-во неоткрытых клеток вокруг равно цифре,  
+  значит эти неоткрытые ячейки - мины;
+- если ячейка открыта, это цифра, и кол-во клеток с флагом вокруг равно цифре,  
+  значит все клетки вокруг (кроме тех что с флагом) можно безопасно открывать  
+  (для этого просто кликни по ячейке с самой цифрой). 

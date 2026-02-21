@@ -62,6 +62,7 @@ struct CellState {
     is_opened: bool,
     is_labeled: bool,
     unknown_around: u8,
+    labeled_around: u8,
 }
 
 impl Game {
@@ -99,6 +100,7 @@ impl Game {
                         };
                         
                         let mut unknown_around: u8 = 0;
+                        let mut labeled_around: u8 = 0;
                         for dx in -1isize..=1 {
                             for dy in -1isize..=1 {
                                 if dx == 0 && dy == 0 { continue; }
@@ -107,6 +109,9 @@ impl Game {
                                 if r >= 0 && r < max_rows as isize && c >= 0 && c < max_cols as isize {
                                     if !self.map[r as usize][c as usize].is_opened {
                                         unknown_around += 1;
+                                    }
+                                    if self.map[r as usize][c as usize].is_labeled {
+                                        labeled_around += 1;
                                     }
                                 }
                             }
@@ -119,6 +124,7 @@ impl Game {
                             is_opened: cell.is_opened,
                             is_labeled: cell.is_labeled,
                             unknown_around,
+                            labeled_around,
                         }
                     })
                     .collect()
