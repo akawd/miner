@@ -4,15 +4,14 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::io::{Write, stdout};
-use std::sync::mpsc;
 use std::time::Instant;
 use tiny_http::{Response, Server};
 
 const SIZE: f32 = 20.0;
 const CAPTION_HEIGHT: f32 = 30.0;
-const WIDTH: u8 = 30;
-const HEIGHT: u8 = 16;
-const MINES_COUNT: u8 = 99;
+const WIDTH: u8 = 9;
+const HEIGHT: u8 = 9;
+const MINES_COUNT: u8 = 10;
 
 #[derive(Clone)]
 pub enum CellType {
@@ -57,6 +56,8 @@ struct GameState {
 
 #[derive(Serialize)]
 struct CellState {
+    row: usize,
+    col: usize,
     cell: String,
     is_opened: bool,
     is_labeled: bool,
@@ -78,15 +79,23 @@ impl Game {
     fn to_state(&self) -> GameState {
         let cells: Vec<Vec<CellState>> = self.map
             .iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(row_idx, row)| {
                 row.iter()
-                    .map(|cell| {
-                        let cell_str = match &cell.cell {
-                            CellType::Mine => "mine".to_string(),
-                            CellType::Empty => "empty".to_string(),
-                            CellType::Number(n) => n.to_string(),
+                    .enumerate()
+                    .map(|(col_idx, cell)| {
+                        let cell_str = if cell.is_opened {
+                            match &cell.cell {
+                                CellType::Mine => "mine".to_string(),
+                                CellType::Empty => "empty".to_string(),
+                                CellType::Number(n) => n.to_string(),
+                            }
+                        } else {
+                            "unknown".to_string()
                         };
                         CellState {
+                            row: row_idx,
+                            col: col_idx,
                             cell: cell_str,
                             is_opened: cell.is_opened,
                             is_labeled: cell.is_labeled,
@@ -513,7 +522,7 @@ fn draw_status(game: &mut Game) {
     draw_text("N for new game.", 450.0, 20.0, 20.0, BEIGE);
 }
 
-fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
+fn start_http_server() {
     std::thread::spawn(move || {
         let server = Server::http("127.0.0.1:8080").unwrap();
         println!("HTTP server started at http://127.0.0.1:8080");
@@ -522,13 +531,10 @@ fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
             let url = request.url();
             let method = request.method().as_str();
             
-            let response = if url == "/state" && method == "GET" {
-                Response::from_string("GET /state - use curl http://127.0.0.1:8080/game")
-            } else if url == "/game" && method == "GET" {
-                Response::from_string("GET /game - use curl http://127.0.0.1:8080/json")
-            } else if url == "/json" && method == "GET" {
-                let game_state = GAME_STATE.lock().unwrap();
-                let json = serde_json::to_string(&*game_state).unwrap();
+            let response = if url == "/json" && method == "GET" {
+                let game = GAME.lock().unwrap();
+                let state = game.to_state();
+                let json = serde_json::to_string(&state).unwrap();
                 Response::from_string(json)
                     .with_header(
                         tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
@@ -538,8 +544,14 @@ fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
                     let x: Option<usize> = params.query_pairs().find(|(k, _)| k == "x").map(|(_, v)| v.parse().ok()).flatten();
                     let y: Option<usize> = params.query_pairs().find(|(k, _)| k == "y").map(|(_, v)| v.parse().ok()).flatten();
                     if let (Some(x), Some(y)) = (x, y) {
-                        let _ = tx.send(ApiMessage { action: "click".to_string(), x: Some(x), y: Some(y) });
-                        Response::from_string("OK")
+                        let mut game = GAME.lock().unwrap();
+                        handle_api_input(&mut game, &ApiMessage { action: "click".to_string(), x: Some(x), y: Some(y) });
+                        let state = game.to_state();
+                        let json = serde_json::to_string(&state).unwrap();
+                        Response::from_string(json)
+                            .with_header(
+                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+                            )
                     } else {
                         Response::from_string("Missing x or y")
                     }
@@ -551,8 +563,14 @@ fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
                     let x: Option<usize> = params.query_pairs().find(|(k, _)| k == "x").map(|(_, v)| v.parse().ok()).flatten();
                     let y: Option<usize> = params.query_pairs().find(|(k, _)| k == "y").map(|(_, v)| v.parse().ok()).flatten();
                     if let (Some(x), Some(y)) = (x, y) {
-                        let _ = tx.send(ApiMessage { action: "flag".to_string(), x: Some(x), y: Some(y) });
-                        Response::from_string("OK")
+                        let mut game = GAME.lock().unwrap();
+                        handle_api_input(&mut game, &ApiMessage { action: "flag".to_string(), x: Some(x), y: Some(y) });
+                        let state = game.to_state();
+                        let json = serde_json::to_string(&state).unwrap();
+                        Response::from_string(json)
+                            .with_header(
+                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+                            )
                     } else {
                         Response::from_string("Missing x or y")
                     }
@@ -560,10 +578,16 @@ fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
                     Response::from_string("Invalid URL")
                 }
             } else if url == "/restart" && method == "POST" {
-                let _ = tx.send(ApiMessage { action: "restart".to_string(), x: None, y: None });
-                Response::from_string("OK")
+                let mut game = GAME.lock().unwrap();
+                *game = Game::new_game();
+                let state = game.to_state();
+                let json = serde_json::to_string(&state).unwrap();
+                Response::from_string(json)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+                    )
             } else if url == "/" {
-                Response::from_string("Minesweeper API:\n  GET  /json       - game state as JSON\n  POST /click?x=0&y=0 - left click\n  POST /flag?x=0&y=0  - toggle flag\n  POST /restart      - new game")
+                Response::from_string("Minesweeper API:\n  GET  /json       - game state as JSON\n  POST /click?x=0&y=0 - left click (returns state)\n  POST /flag?x=0&y=0  - toggle flag (returns state)\n  POST /restart      - new game (returns state)")
             } else {
                 Response::from_string("Not found")
             };
@@ -575,9 +599,7 @@ fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
 
 use std::sync::Mutex;
 lazy_static::lazy_static! {
-    static ref GAME_STATE: Mutex<GameState> = Mutex::new(GameState {
-        width: 0, height: 0, cells: vec![], time: 0, status: "".to_string(), mines_found: 0
-    });
+    static ref GAME: Mutex<Game> = Mutex::new(Game::new_game());
 }
 
 #[macroquad::main("Miner")]
@@ -585,30 +607,22 @@ async fn main() {
     request_new_screen_size(WIDTH as f32 * SIZE, (HEIGHT as f32) * SIZE + CAPTION_HEIGHT);
     next_frame().await;
 
-    let (tx, rx) = mpsc::channel::<ApiMessage>();
-    start_http_server(tx);
-
-    let mut game = Game::new_game();
+    start_http_server();
 
     loop {
         clear_background(GRAY);
 
         if is_key_pressed(KeyCode::N) {
-            game = Game::new_game();
-        }
-
-        while let Ok(msg) = rx.try_recv() {
-            handle_api_input(&mut game, &msg);
+            let mut game = GAME.lock().unwrap();
+            *game = Game::new_game();
         }
 
         {
-            let mut state = GAME_STATE.lock().unwrap();
-            *state = game.to_state();
+            let mut game = GAME.lock().unwrap();
+            handle_input(&mut game);
+            draw(&game);
+            draw_status(&mut game);
         }
-
-        handle_input(&mut game);
-        draw(&game);
-        draw_status(&mut game);
 
         next_frame().await
     }
