@@ -1,9 +1,12 @@
 use ::rand;
 use macroquad::prelude::*;
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::io::{Write, stdout};
+use std::sync::mpsc;
 use std::time::Instant;
+use tiny_http::{Response, Server};
 
 const SIZE: f32 = 20.0;
 const CAPTION_HEIGHT: f32 = 30.0;
@@ -35,6 +38,30 @@ struct Game {
     status: String,        // some text status
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ApiMessage {
+    pub action: String,
+    pub x: Option<usize>,
+    pub y: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct GameState {
+    width: usize,
+    height: usize,
+    cells: Vec<Vec<CellState>>,
+    time: usize,
+    status: String,
+    mines_found: u8,
+}
+
+#[derive(Serialize)]
+struct CellState {
+    cell: String,
+    is_opened: bool,
+    is_labeled: bool,
+}
+
 impl Game {
     fn new_game() -> Self {
         Game {
@@ -45,6 +72,37 @@ impl Game {
             to_open_count: u16::from(WIDTH) * u16::from(HEIGHT) - u16::from(MINES_COUNT),
             time: 0,
             status: String::new(),
+        }
+    }
+
+    fn to_state(&self) -> GameState {
+        let cells: Vec<Vec<CellState>> = self.map
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        let cell_str = match &cell.cell {
+                            CellType::Mine => "mine".to_string(),
+                            CellType::Empty => "empty".to_string(),
+                            CellType::Number(n) => n.to_string(),
+                        };
+                        CellState {
+                            cell: cell_str,
+                            is_opened: cell.is_opened,
+                            is_labeled: cell.is_labeled,
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        GameState {
+            width: WIDTH as usize,
+            height: HEIGHT as usize,
+            cells,
+            time: self.time,
+            status: self.status.clone(),
+            mines_found: self.mines_found,
         }
     }
 
@@ -455,11 +513,80 @@ fn draw_status(game: &mut Game) {
     draw_text("N for new game.", 450.0, 20.0, 20.0, BEIGE);
 }
 
+fn start_http_server(tx: mpsc::Sender<ApiMessage>) {
+    std::thread::spawn(move || {
+        let server = Server::http("127.0.0.1:8080").unwrap();
+        println!("HTTP server started at http://127.0.0.1:8080");
+        
+        for request in server.incoming_requests() {
+            let url = request.url();
+            let method = request.method().as_str();
+            
+            let response = if url == "/state" && method == "GET" {
+                Response::from_string("GET /state - use curl http://127.0.0.1:8080/game")
+            } else if url == "/game" && method == "GET" {
+                Response::from_string("GET /game - use curl http://127.0.0.1:8080/json")
+            } else if url == "/json" && method == "GET" {
+                let game_state = GAME_STATE.lock().unwrap();
+                let json = serde_json::to_string(&*game_state).unwrap();
+                Response::from_string(json)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
+                    )
+            } else if url.starts_with("/click") && method == "POST" {
+                if let Ok(params) = url::Url::parse(&format!("http://localhost{}", url)) {
+                    let x: Option<usize> = params.query_pairs().find(|(k, _)| k == "x").map(|(_, v)| v.parse().ok()).flatten();
+                    let y: Option<usize> = params.query_pairs().find(|(k, _)| k == "y").map(|(_, v)| v.parse().ok()).flatten();
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = tx.send(ApiMessage { action: "click".to_string(), x: Some(x), y: Some(y) });
+                        Response::from_string("OK")
+                    } else {
+                        Response::from_string("Missing x or y")
+                    }
+                } else {
+                    Response::from_string("Invalid URL")
+                }
+            } else if url.starts_with("/flag") && method == "POST" {
+                if let Ok(params) = url::Url::parse(&format!("http://localhost{}", url)) {
+                    let x: Option<usize> = params.query_pairs().find(|(k, _)| k == "x").map(|(_, v)| v.parse().ok()).flatten();
+                    let y: Option<usize> = params.query_pairs().find(|(k, _)| k == "y").map(|(_, v)| v.parse().ok()).flatten();
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = tx.send(ApiMessage { action: "flag".to_string(), x: Some(x), y: Some(y) });
+                        Response::from_string("OK")
+                    } else {
+                        Response::from_string("Missing x or y")
+                    }
+                } else {
+                    Response::from_string("Invalid URL")
+                }
+            } else if url == "/restart" && method == "POST" {
+                let _ = tx.send(ApiMessage { action: "restart".to_string(), x: None, y: None });
+                Response::from_string("OK")
+            } else if url == "/" {
+                Response::from_string("Minesweeper API:\n  GET  /json       - game state as JSON\n  POST /click?x=0&y=0 - left click\n  POST /flag?x=0&y=0  - toggle flag\n  POST /restart      - new game")
+            } else {
+                Response::from_string("Not found")
+            };
+            
+            let _ = request.respond(response);
+        }
+    });
+}
+
+use std::sync::Mutex;
+lazy_static::lazy_static! {
+    static ref GAME_STATE: Mutex<GameState> = Mutex::new(GameState {
+        width: 0, height: 0, cells: vec![], time: 0, status: "".to_string(), mines_found: 0
+    });
+}
+
 #[macroquad::main("Miner")]
 async fn main() {
     request_new_screen_size(WIDTH as f32 * SIZE, (HEIGHT as f32) * SIZE + CAPTION_HEIGHT);
-    // from the docs: @"the size in macroquad won’t be updated until the next next_frame().await."
     next_frame().await;
+
+    let (tx, rx) = mpsc::channel::<ApiMessage>();
+    start_http_server(tx);
 
     let mut game = Game::new_game();
 
@@ -470,10 +597,69 @@ async fn main() {
             game = Game::new_game();
         }
 
+        while let Ok(msg) = rx.try_recv() {
+            handle_api_input(&mut game, &msg);
+        }
+
+        {
+            let mut state = GAME_STATE.lock().unwrap();
+            *state = game.to_state();
+        }
+
         handle_input(&mut game);
         draw(&game);
         draw_status(&mut game);
 
         next_frame().await
+    }
+}
+
+fn handle_api_input(game: &mut Game, msg: &ApiMessage) {
+    match msg.action.as_str() {
+        "restart" => {
+            *game = Game::new_game();
+        },
+        "click" => {
+            if let (Some(x), Some(y)) = (msg.x, msg.y) {
+                if y < HEIGHT as usize && x < WIDTH as usize {
+                    let row = y;
+                    let col = x;
+                    match game.map[row][col] {
+                        Cell { is_labeled: true, .. } => (),
+                        Cell { cell: CellType::Mine, .. } => game.fail(),
+                        Cell { cell: CellType::Empty, is_opened: false, .. } => {
+                            open_empties(game, (row, col));
+                        },
+                        Cell { cell: CellType::Number(n), is_opened: true, .. } => {
+                            open_around(game, (row, col), n);
+                        },
+                        _ => {
+                            game.map[row][col].is_opened = true;
+                            game.to_open_count = game.to_open_count.saturating_sub(1);
+                        }
+                    }
+                    if game.to_open_count == 0 {
+                        game.win();
+                    }
+                }
+            }
+        },
+        "flag" => {
+            if let (Some(x), Some(y)) = (msg.x, msg.y) {
+                if y < HEIGHT as usize && x < WIDTH as usize {
+                    let row = y;
+                    let col = x;
+                    if !game.map[row][col].is_opened {
+                        game.map[row][col].is_labeled = !game.map[row][col].is_labeled;
+                        if game.map[row][col].is_labeled {
+                            game.mines_found = game.mines_found.saturating_add(1);
+                        } else {
+                            game.mines_found = game.mines_found.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+        },
+        _ => {}
     }
 }
